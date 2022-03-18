@@ -79,9 +79,20 @@ impl Doc {
         self.protocol_host_pair() == Some((protocol, host))
     }
 
-    pub fn matches_creds(&self, creds: &UsernamePasswordPair) -> bool {
+    fn username_password_pair(&self) -> Option<(&str, &str)> {
         self.username.as_deref().zip(self.password.as_deref())
-            == Some((&creds.username, &creds.password))
+    }
+
+    pub fn creds(&self) -> Option<UsernamePasswordPair> {
+        self.username_password_pair()
+            .map(|(username, password)| UsernamePasswordPair {
+                username: username.to_owned(),
+                password: password.to_owned(),
+            })
+    }
+
+    pub fn matches_creds(&self, creds: &UsernamePasswordPair) -> bool {
+        self.username_password_pair() == Some((&creds.username, &creds.password))
     }
 
     pub fn with_creds(self, creds: UsernamePasswordPair) -> Self {

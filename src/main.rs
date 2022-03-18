@@ -7,11 +7,13 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Exciting GitHub credential helper")]
 enum Operation {
+    /// The git client requests this when it wants fresh-baked credentials! 🍪
     Get,
+    /// The git client requests this if the credentials succeed.
     Store,
+    /// The git client requests this if the credentials fail.
     Erase,
 }
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -21,16 +23,17 @@ async fn main() -> anyhow::Result<()> {
     if doc.matches_url("https", "github.com") {
         let cache = Cache::new();
         match operation {
-            // git wants fresh-baked credentials! 🍪
             Operation::Get => {
                 let creds = UsernamePasswordPair::generate(&cache).await?;
                 doc.with_creds(creds).with_quit(true).write()?;
             }
-            // git succeeded using the credentials from `get`
             Operation::Store => {
-                log::info!("`Store` is unsupported; doing nothing");
+                if let Some(creds) = doc.creds() {
+                    cache.write(&creds)?;
+                } else {
+                    anyhow::bail!("no creds were specified to store");
+                }
             }
-            // git failed using the credentials from `get`
             Operation::Erase => {
                 if let Some(creds) = UsernamePasswordPair::from_cache(&cache)? {
                     if doc.matches_creds(&creds) {
