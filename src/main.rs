@@ -1,53 +1,50 @@
-mod auth;
-mod env;
-mod installation;
-mod writer;
+mod creds;
+mod doc;
 
-use self::{env::*, installation::*, writer::*};
-use octocrab::{auth::AppAuth, OctocrabBuilder};
-use serde::Serialize;
-use std::time::Duration;
+use self::{creds::*, doc::*};
+use structopt::StructOpt;
 
-static OWNER: &str = "BrainiumLLC";
-// 60 minutes is the actual expiration on GitHub, but we need to have a margin
-// to ensure the token doesn't expire mid-build.
-const MAX_TOKEN_AGE: Duration = Duration::from_secs(45 * 60);
-
-#[derive(Debug, Serialize)]
-pub struct UsernamePasswordPair {
-    username: String,
-    password: String,
-}
-
-impl UsernamePasswordPair {
-    async fn from_github_app() -> anyhow::Result<Self> {
-        let AppAuth { app_id, key } = Env::read()?.try_into()?;
-        Ok(Self {
-            username: app_id.to_string(),
-            password: {
-                let gh = OctocrabBuilder::new().app(app_id, key).build()?;
-                let installation = find_installation(&gh, OWNER).await?;
-                let gh = gh.installation(installation.id);
-                gh.request_installation_auth_token().await?
-            },
-        })
-    }
+#[derive(Debug, StructOpt)]
+#[structopt(about = "Exciting GitHub credential helper")]
+enum Operation {
+    Get,
+    Store,
+    Erase,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    let writer = {
-        let dst_dir = std::env::temp_dir().join(concat!("com.brainium.", env!("CARGO_PKG_NAME")));
-        GitAskpassWriter::new(&dst_dir)?
-    };
-    if writer.needs_refresh(MAX_TOKEN_AGE)? {
-        log::info!("a new `GIT_ASKPASS` file must be generated");
-        let creds = UsernamePasswordPair::from_github_app().await?;
-        writer.write(&creds)?;
+    let operation = Operation::from_args();
+    log::info!("received operation `{:?}`", operation);
+    let doc = Doc::read()?;
+    if doc.matches_url("https", "github.com") {
+        let cache = Cache::new();
+        match operation {
+            // git wants fresh-baked credentials! 🍪
+            Operation::Get => {
+                let creds = UsernamePasswordPair::generate(&cache).await?;
+                doc.with_creds(creds).with_quit(true).write()?;
+            }
+            // git succeeded using the credentials from `get`
+            Operation::Store => {
+                log::info!("`Store` is unsupported; doing nothing");
+            }
+            // git failed using the credentials from `get`
+            Operation::Erase => {
+                if let Some(creds) = UsernamePasswordPair::from_cache(&cache)? {
+                    if doc.matches_creds(&creds) {
+                        cache.delete()?;
+                    } else {
+                        log::info!("input creds don't match what's stored; doing nothing");
+                    }
+                } else {
+                    log::info!("no creds are currently stored; doing nothing");
+                }
+            }
+        }
     } else {
-        log::info!("current `GIT_ASKPASS` file is still valid");
+        log::info!("request isn't for GitHub; doing nothing");
     }
-    println!("{}", writer.dst().display());
     Ok(())
 }

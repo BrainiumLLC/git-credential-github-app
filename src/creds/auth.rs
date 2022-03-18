@@ -1,4 +1,4 @@
-use crate::env::Env;
+use super::env::Env;
 use jsonwebtoken::EncodingKey;
 use octocrab::{auth::AppAuth, models::AppId};
 use thiserror::Error;
